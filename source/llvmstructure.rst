@@ -844,6 +844,593 @@ addLiveOut() function is provided.  Instead, the MIPS backend marks "live out"
 registers with DAG=DAG.getCopyToReg(..., $2, ...) (which copies the DAG) since
 no local varaiables exist after a function exits.
 
+Cpu0 Processor Architecture Details
+-----------------------------------
+
+This section is based on materials available here [#cpu0-chinese]_ (Chinese)
+and here [#cpu0-english]_ (English).
+
+Brief introduction
+~~~~~~~~~~~~~~~~~~
+
+Cpu0 is a 32-bit architecture. It has 16 general purpose registers (R0, ...,
+R15), co-processor registers (like Mips), and other special registers. Its
+structure is illustrated in :numref:`llvmstructure-f1` below.
+
+.. _llvmstructure-f1:
+.. figure:: ../Fig/llvmstructure/1.png
+  :width: 608 px
+  :height: 360 px
+  :align: center
+
+  Architectural block diagram of the Cpu0 processor
+
+
+The registers are used for the following purposes:
+
+.. table:: Cpu0 general purpose registers (GPR)
+
+  ============  ===========
+  Register      Description
+  ============  ===========
+  R0            Constant register, value is 0
+  R1-R10        General-purpose registers
+  R11           Global Pointer register (GP)
+  R12           Frame Pointer register (FP)
+  R13           Stack Pointer register (SP)
+  R14           Link Register (LR)
+  R15           Status Word Register (SW)
+  ============  ===========
+
+.. table:: Cpu0 co-processor 0 registers (C0R)
+
+  ============  ===========
+  Register      Description
+  ============  ===========
+  0             Program Counter (PC)
+  1             Error Program Counter (EPC)
+  ============  ===========
+
+.. table:: Cpu0 other registers
+
+  ============  ===========
+  Register      Description
+  ============  ===========
+  IR            Instruction register
+  MAR           Memory Address Register (MAR)
+  MDR           Memory Data Register (MDR)
+  HI            High part of MULT result
+  LO            Low part of MULT result
+  ============  ===========
+
+The Cpu0 Instruction Set
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Cpu0 instruction set can be divided into three types: L-type instructions,
+which are generally associated with memory operations, A-type instructions for
+arithmetic operations, and J-type instructions that are typically used when
+altering control flow (i.e. jumps).
+:numref:`llvmstructure-f2` illustrates how the bitfields are broken down
+for each type of instruction.
+
+.. _llvmstructure-f2:
+.. figure:: ../Fig/llvmstructure/2.png
+  :width: 601 px
+  :height: 331 px
+  :align: center
+
+  Cpu0's three instruction formats
+
+The Cpu0 has two ISA, the first ISA-I is cpu032I which hired CMP instruction
+from ARM; the second ISA-II is cpu032II which hired SLT instruction from Mips.
+The cpu032II include all cpu032I instruction set and add SLT, BEQ, ...,
+instructions. The main purpose to add cpu032II is for instruction set design
+explanation. As you will see in later chapter (chapter Control flow statements),
+the SLT instruction will has better performance than CMP old style instruction.
+The following table details the cpu032I instruction set:
+
+- First column F\.: meaning Format.
+
+.. list-table:: cpu032I Instruction Set
+  :widths: 1 4 3 11 7 10
+  :header-rows: 1
+
+  * - F\.
+    - Mnemonic
+    - Opcode
+    - Meaning
+    - Syntax
+    - Operation
+  * - L
+    - NOP
+    - 00
+    - No Operation
+    -
+    -
+  * - L
+    - LD
+    - 01
+    - Load word
+    - LD Ra, [Rb+Cx]
+    - Ra <= [Rb+Cx]
+  * - L
+    - ST
+    - 02
+    - Store word
+    - ST Ra, [Rb+Cx]
+    - [Rb+Cx] <= Ra
+  * - L
+    - LB
+    - 03
+    - Load byte
+    - LB Ra, [Rb+Cx]
+    - Ra <= (byte)[Rb+Cx] [#lb-note]_
+  * - L
+    - LBu
+    - 04
+    - Load byte unsigned
+    - LBu Ra, [Rb+Cx]
+    - Ra <= (byte)[Rb+Cx] [#lb-note]_
+  * - L
+    - SB
+    - 05
+    - Store byte
+    - SB Ra, [Rb+Cx]
+    - [Rb+Cx] <= (byte)Ra
+  * - L
+    - LH
+    - 06
+    - Load half word
+    - LH Ra, [Rb+Cx]
+    - Ra <= (2bytes)[Rb+Cx] [#lb-note]_
+  * - L
+    - LHu
+    - 07
+    - Load half word unsigned
+    - LHu Ra, [Rb+Cx]
+    - Ra <= (2bytes)[Rb+Cx] [#lb-note]_
+  * - L
+    - SH
+    - 08
+    - Store half word
+    - SH Ra, [Rb+Cx]
+    - [Rb+Cx] <= Ra
+  * - L
+    - ADDiu
+    - 09
+    - Add immediate
+    - ADDiu Ra, Rb, Cx
+    - Ra <= (Rb + Cx)
+  * - L
+    - ANDi
+    - 0C
+    - AND imm
+    - ANDi Ra, Rb, Cx
+    - Ra <= (Rb & Cx)
+  * - L
+    - ORi
+    - 0D
+    - OR
+    - ORi Ra, Rb, Cx
+    - Ra <= (Rb | Cx)
+  * - L
+    - XORi
+    - 0E
+    - XOR
+    - XORi Ra, Rb, Cx
+    - Ra <= (Rb \^ Cx)
+  * - L
+    - LUi
+    - 0F
+    - Load upper
+    - LUi Ra, Cx
+    - Ra <= (Cx << 16)
+  * - A
+    - CMP
+    - 10
+    - Compare
+    - CMP Ra, Rb
+    - SW <= (Ra cond Rb) [#cond-note]_
+  * - A
+    - ADDu
+    - 11
+    - Add unsigned
+    - ADD Ra, Rb, Rc
+    - Ra <= Rb + Rc [#u-note]_
+  * - A
+    - SUBu
+    - 12
+    - Sub unsigned
+    - SUB Ra, Rb, Rc
+    - Ra <= Rb - Rc [#u-note]_
+  * - A
+    - ADD
+    - 13
+    - Add
+    - ADD Ra, Rb, Rc
+    - Ra <= Rb + Rc [#u-note]_
+  * - A
+    - SUB
+    - 14
+    - Subtract
+    - SUB Ra, Rb, Rc
+    - Ra <= Rb - Rc [#u-note]_
+  * - A
+    - MUL
+    - 17
+    - Multiply
+    - MUL Ra, Rb, Rc
+    - Ra <= Rb * Rc
+  * - A
+    - AND
+    - 18
+    - Bitwise and
+    - AND Ra, Rb, Rc
+    - Ra <= Rb & Rc
+  * - A
+    - OR
+    - 19
+    - Bitwise or
+    - OR Ra, Rb, Rc
+    - Ra <= Rb | Rc
+  * - A
+    - XOR
+    - 1A
+    - Bitwise exclusive or
+    - XOR Ra, Rb, Rc
+    - Ra <= Rb ^ Rc
+  * - A
+    - ROL
+    - 1B
+    - Rotate left
+    - ROL Ra, Rb, Cx
+    - Ra <= Rb rol Cx
+  * - A
+    - ROR
+    - 1C
+    - Rotate right
+    - ROR Ra, Rb, Cx
+    - Ra <= Rb ror Cx
+  * - A
+    - SRA
+    - 1D
+    - Shift right
+    - SRA Ra, Rb, Cx
+    - Ra <= Rb '>> Cx [#sra-note]_
+  * - A
+    - SHL
+    - 1E
+    - Shift left
+    - SHL Ra, Rb, Cx
+    - Ra <= Rb << Cx
+  * - A
+    - SHR
+    - 1F
+    - Shift right
+    - SHR Ra, Rb, Cx
+    - Ra <= Rb >> Cx
+  * - A
+    - SRAV
+    - 20
+    - Shift right
+    - SRAV Ra, Rb, Rc
+    - Ra <= Rb '>> Rc [#sra-note]_
+  * - A
+    - SHLV
+    - 21
+    - Shift left
+    - SHLV Ra, Rb, Rc
+    - Ra <= Rb << Rc
+  * - A
+    - SHRV
+    - 22
+    - Shift right
+    - SHRV Ra, Rb, Rc
+    - Ra <= Rb >> Rc
+  * - A
+    - ROL
+    - 23
+    - Rotate left
+    - ROL Ra, Rb, Rc
+    - Ra <= Rb rol Rc
+  * - A
+    - ROR
+    - 24
+    - Rotate right
+    - ROR Ra, Rb, Rc
+    - Ra <= Rb ror Rc
+  * - J
+    - JEQ
+    - 30
+    - Jump if equal (==)
+    - JEQ Cx
+    - if SW(==), PC <= PC + Cx
+  * - J
+    - JNE
+    - 31
+    - Jump if not equal (!=)
+    - JNE Cx
+    - if SW(!=), PC <= PC + Cx
+  * - J
+    - JLT
+    - 32
+    - Jump if less than (<)
+    - JLT Cx
+    - if SW(<), PC <= PC + Cx
+  * - J
+    - JGT
+    - 33
+    - Jump if greater than (>)
+    - JGT Cx
+    - if SW(>), PC <= PC + Cx
+  * - J
+    - JLE
+    - 34
+    - Jump if less than or equals (<=)
+    - JLE Cx
+    - if SW(<=), PC <= PC + Cx
+  * - J
+    - JGE
+    - 35
+    - Jump if greater than or equals (>=)
+    - JGE Cx
+    - if SW(>=), PC <= PC + Cx
+  * - J
+    - JMP
+    - 36
+    - Jump (unconditional)
+    - JMP Cx
+    - PC <= PC + Cx
+  * - J
+    - JALR
+    - 39
+    - Indirect jump
+    - JALR Rb
+    - LR <= PC; PC <= Rb [#call-note]_
+  * - J
+    - JSUB
+    - 3B
+    - Jump to subroutine
+    - JSUB Cx
+    - LR <= PC; PC <= PC + Cx
+  * - J
+    - JR/RET
+    - 3C
+    - Return from subroutine
+    - JR $1 or RET LR
+    - PC <= LR [#jr-note]_
+  * - A
+    - MULT
+    - 41
+    - Multiply for 64 bits result
+    - MULT Ra, Rb
+    - (HI,LO) <= MULT(Ra,Rb)
+  * - A
+    - MULTU
+    - 42
+    - MULT for unsigned 64 bits
+    - MULTU Ra, Rb
+    - (HI,LO) <= MULTU(Ra,Rb)
+  * - A
+    - DIV
+    - 43
+    - Divide
+    - DIV Ra, Rb
+    - HI<=Ra%Rb, LO<=Ra/Rb
+  * - A
+    - DIVU
+    - 44
+    - Divide unsigned
+    - DIVU Ra, Rb
+    - HI<=Ra%Rb, LO<=Ra/Rb
+  * - A
+    - MFHI
+    - 46
+    - Move HI to GPR
+    - MFHI Ra
+    - Ra <= HI
+  * - A
+    - MFLO
+    - 47
+    - Move LO to GPR
+    - MFLO Ra
+    - Ra <= LO
+  * - A
+    - MTHI
+    - 48
+    - Move GPR to HI
+    - MTHI Ra
+    - HI <= Ra
+  * - A
+    - MTLO
+    - 49
+    - Move GPR to LO
+    - MTLO Ra
+    - LO <= Ra
+  * - A
+    - MFC0
+    - 50
+    - Move C0R to GPR
+    - MFC0 Ra, Rb
+    - Ra <= Rb
+  * - A
+    - MTC0
+    - 51
+    - Move GPR to C0R
+    - MTC0 Ra, Rb
+    - Ra <= Rb
+  * - A
+    - C0MOV
+    - 52
+    - Move C0R to C0R
+    - C0MOV Ra, Rb
+    - Ra <= Rb
+
+
+The following table details the cpu032II instruction set added:
+
+.. list-table:: cpu032II Instruction Set
+  :widths: 1 4 3 11 7 10
+  :header-rows: 1
+
+  * - F\.
+    - Mnemonic
+    - Opcode
+    - Meaning
+    - Syntax
+    - Operation
+  * - L
+    - SLTi
+    - 26
+    - Set less Then
+    - SLTi Ra, Rb, Cx
+    - Ra <= (Rb < Cx)
+  * - L
+    - SLTiu
+    - 27
+    - SLTi unsigned
+    - SLTiu Ra, Rb, Cx
+    - Ra <= (Rb < Cx)
+  * - A
+    - SLT
+    - 28
+    - Set less Then
+    - SLT Ra, Rb, Rc
+    - Ra <= (Rb < Rc)
+  * - A
+    - SLTu
+    - 29
+    - SLT unsigned
+    - SLTu Ra, Rb, Rc
+    - Ra <= (Rb < Rc)
+  * - L
+    - BEQ
+    - 37
+    - Branch if equal
+    - BEQ Ra, Rb, Cx
+    - if (Ra==Rb), PC <= PC + Cx
+  * - L
+    - BNE
+    - 38
+    - Branch if not equal
+    - BNE Ra, Rb, Cx
+    - if (Ra!=Rb), PC <= PC + Cx
+  * - J
+    - BAL
+    - 3A
+    - Branch and link
+    - BAL Cx
+    - LR <= PC; PC <= PC + Cx
+
+.. note:: **Cpu0 unsigned instructions**
+
+  Like Mips, except DIVU, the mathematic unsigned instructions such as ADDu and
+  SUBu, are instructions of no overflow exception.
+  The ADDu and SUBu handle both signed and unsigned integers well.
+  For example, (ADDu 1, -2) is -1; (ADDu 0x01, 0xfffffffe) is 0xffffffff = (4G
+  - 1).
+  If you treat the result is negative then it is -1.
+  On the other hand, it's (+4G - 1) if you treat the result is positive.
+
+
+Why not using ADD instead of SUB?
+`````````````````````````````````
+
+From text book of computer introduction, we know SUB can be replaced by
+ADD as follows,
+
+- (A - B) = (A + (-B))
+
+Since Mips uses 32 bits to represent int type of C language, if B is the
+value of -2G, then
+
+- (A - (-2G)) = (A + (2G))
+
+But the problem is value -2G can be represented in 32 bits machine while 2G
+cannot,
+since the range of 2's complement representation for 32 bits is (-2G .. 2G-1).
+The 2's complement reprentation has the merit of fast computation in circuits
+design, it is widely used in real CPU implementation.
+That's why almost every CPU create SUB instruction, rather than using ADD
+instead of.
+
+
+The Status Register
+~~~~~~~~~~~~~~~~~~~
+
+The Cpu0 status word register (SW) contains the state of the Negative (N),
+Zero (Z), Carry (C), Overflow (V), Debug (D), Mode (M), and Interrupt (I) flags.
+The bit layout of the SW register is shown in :numref:`llvmstructure-f3`
+below.
+
+.. _llvmstructure-f3:
+.. figure:: ../Fig/llvmstructure/3.png
+  :width: 684 px
+  :height: 126 px
+  :align: center
+
+  Cpu0 status word (SW) register
+
+When a CMP Ra, Rb instruction executes, the condition flags will change.
+For example:
+
+- If Ra > Rb, then N = 0, Z = 0
+- If Ra < Rb, then N = 1, Z = 0
+- If Ra = Rb, then N = 0, Z = 1
+
+The direction (i.e. taken/not taken) of the conditional jump instructions JGT,
+JLT, JGE, JLE, JEQ, JNE is determined by the N and Z flags in the SW register.
+
+Cpu0's Stages of Instruction Execution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Cpu0 architecture has a five-stage pipeline. The stages are instruction
+fetch (IF), instruction decode (ID), execute (EX), memory access (MEM) and
+write backe (WB).
+Here is a description of what happens in the processor for each stage:
+
+1) Instruction fetch (IF)
+
+- The Cpu0 fetches the instruction pointed to by the Program Counter (PC) into
+  the Instruction Register (IR): IR = [PC].
+- The PC is then updated to point to the next instruction: PC = PC + 4.
+
+2) Instruction decode (ID)
+
+- The control unit decodes the instruction stored in IR, which routes necessary
+  data stored in registers to the ALU, and sets the ALU's operation mode based
+  on the current instruction's opcode.
+
+3) Execute (EX)
+
+- The ALU executes the operation designated by the control unit upon data in
+  registers.
+  Except load and store instructions, the result is stored in the destination
+  register after the ALU is done.
+
+4) Memory access (MEM)
+
+- Read data from data cache to pipeline register MEM/WB if it is load
+  instruction; write data from register to data cache if it is strore
+  instruction.
+
+5) Write-back (WB)
+
+- Move data from pipeline register MEM/WB to Register if it is load instruction.
+
+
+Cpu0's Interrupt Vector
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. table:: Cpu0's Interrupt Vector
+
+  ========  ===========
+  Address   type
+  ========  ===========
+  0x00      Reset
+  0x04      Error Handle
+  0x08      Interrupt
+  ========  ===========
 
 Create Cpu0 backend
 --------------------
